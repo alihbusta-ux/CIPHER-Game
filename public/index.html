@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIPHER // Multiplayer Classroom</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+    :root { --bg: #050505; --panel: #111111; --border: #333; --green: #00ff41; --green-dim: #008f11; --text: #e0e0e0; --accent: #ff003c; --yellow: #ffcc00; --blue: #00ccff; --brown: #5c3a21; --magenta: #ff00ff; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background-color: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+    .btn { background: transparent; border: 1px solid var(--green); color: var(--green); padding: 10px 20px; font-family: 'JetBrains Mono', monospace; font-weight: bold; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 1px; }
+    .btn:hover { background: var(--green); color: var(--bg); box-shadow: 0 0 15px var(--green); }
+    .btn-red { border-color: var(--accent); color: var(--accent); }
+    .btn-red:hover { background: var(--accent); color: white; box-shadow: 0 0 15px var(--accent); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    input, select { background: #000; border: 1px solid var(--border); color: var(--green); padding: 10px; font-family: 'JetBrains Mono', monospace; width: 100%; outline: none; }
+    input:focus, select:focus { border-color: var(--green); }
+    select option { background: var(--panel); color: var(--green); }
+    .screen { display: none; height: 100%; width: 100%; }
+    .screen.active { display: flex; flex-direction: column; }
+
+    #boot-screen { justify-content: center; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--green); }
+    .boot-text { font-size: 1.2rem; margin-bottom: 20px; animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    #join-screen { justify-content: center; align-items: center; background: radial-gradient(circle at center, #0a1a0a 0%, var(--bg) 100%); flex-direction: row; gap: 50px;}
+    .join-box { background: var(--panel); border: 1px solid var(--border); padding: 40px; width: 400px; box-shadow: 0 0 30px rgba(0, 255, 65, 0.1); text-align: center; }
+    .join-box h1 { color: var(--green); font-family: 'JetBrains Mono', monospace; letter-spacing: 5px; margin-bottom: 10px; }
+    .join-box p { color: #888; margin-bottom: 30px; font-size: 0.9rem; }
+    .input-group { margin-bottom: 15px; text-align: left; }
+    .input-group label { display: block; font-size: 0.8rem; color: var(--green-dim); margin-bottom: 5px; font-family: 'JetBrains Mono', monospace; }
+
+    #hub-screen { padding: 20px; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 30px; }
+    .user-info { font-family: 'JetBrains Mono', monospace; color: var(--green); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .card { background: var(--panel); border: 1px solid var(--border); padding: 20px; cursor: pointer; transition: all 0.2s; }
+    .card:hover { border-color: var(--green); transform: translateY(-5px); }
+    .card h3 { color: var(--green); margin-bottom: 10px; font-family: 'JetBrains Mono', monospace; }
+    .card p { color: #888; font-size: 0.9rem; line-height: 1.5; }
+
+    #game-screen { padding: 10px; flex-direction: row; gap: 10px; height: 100vh; position: relative; }
+    .sidebar { width: 320px; background: var(--panel); border: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
+    .sidebar h2 { color: var(--green); font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .cheat-sheet { background: #0a0a0a; border: 1px solid var(--green-dim); padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #aaa; border-radius: 4px; }
+    .cheat-sheet h4 { color: var(--green); margin-bottom: 8px; text-transform: uppercase; }
+    .cheat-sheet code { color: var(--yellow); background: #1a1a00; padding: 2px 4px; display: inline-block; margin: 2px 0; border-radius: 2px;}
+    .main-area { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    .editor-container { flex: 1; display: flex; background: #000; border: 1px solid var(--border); position: relative; }
+    .line-numbers { width: 40px; background: var(--panel); color: #555; text-align: right; padding: 15px 5px; font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.5; user-select: none; border-right: 1px solid var(--border); }
+    textarea { flex: 1; background: transparent; color: var(--green); font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.5; padding: 15px; border: none; outline: none; resize: none; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+    textarea::selection { background: rgba(0, 255, 65, 0.3); }
+    .terminal-container { height: 150px; background: #000; border: 1px solid var(--border); display: flex; flex-direction: column; }
+    .terminal-head { background: var(--panel); padding: 5px 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--green-dim); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+    .terminal-output { flex: 1; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text); overflow-y: auto; white-space: pre-wrap; }
+    .terminal-output .error { color: var(--accent); }
+    .terminal-output .success { color: var(--green); }
+    
+    .heist-leaderboard-container { display: flex; flex-direction: column; gap: 5px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+    .heist-player { display: flex; justify-content: space-between; padding: 6px; border-left: 3px solid transparent; background: #1a1a1a; }
+    .heist-player.you { border-left-color: var(--green); background: #003300; color: var(--green); font-weight: bold; }
+    .heist-player.dead { color: #555; text-decoration: line-through; background: #0a0a0a; }
+    .heist-status { font-size: 0.7rem; padding: 2px 4px; border-radius: 2px; font-weight: bold; }
+    .status-active { background: #003300; color: var(--green); }
+    .status-hacked { background: #330000; color: var(--accent); }
+    
+    .farm-layout { flex: 1; display: flex; gap: 15px; overflow: hidden; }
+    .grid-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; background: #0a0a0a; border: 1px solid var(--border); padding: 20px; overflow: auto; }
+    .grid-container { display: grid; gap: 2px; background: #222; border: 4px solid #444; padding: 5px; }
+    .tile { width: 28px; height: 28px; background: #1a1a1a; border: 1px solid #333; display: flex; justify-content: center; align-items: center; font-size: 12px; font-weight: bold; font-family: 'JetBrains Mono', monospace; transition: all 0.15s; }
+    .tile.tilled { background: var(--brown); color: #fff; }
+    .tile.planted { background: #1b4a1b; color: #00ff00; }
+    .tile.grown-grass { background: #00ff00; color: #000; box-shadow: inset 0 0 10px #fff; }
+    .tile.grown-carrot { background: #ff8800; color: #000; box-shadow: inset 0 0 10px #fff; }
+    .tile.drone { border: 2px solid #fff !important; background: var(--magenta) !important; color: #fff !important; box-shadow: 0 0 15px 5px var(--magenta) !important; z-index: 10; font-size: 14px; animation: pulse 1s infinite; }
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+    
+    /* TEACHER LOBBY */
+    #teacher-screen { padding: 40px; align-items: center; justify-content: center; }
+    .teacher-box { background: var(--panel); border: 2px solid var(--green); padding: 40px; width: 600px; text-align: center; box-shadow: 0 0 50px rgba(0,255,65,0.2); }
+    .pin-display { font-size: 4rem; font-family: 'JetBrains Mono'; color: var(--yellow); letter-spacing: 10px; margin: 20px 0; text-shadow: 0 0 20px var(--yellow); }
+    .teacher-roster { text-align: left; margin-top: 20px; max-height: 300px; overflow-y: auto; font-family: 'JetBrains Mono'; background: #000; padding: 15px; border: 1px solid var(--border); }
+
+    /* TEACHER MONITOR DASHBOARD */
+    #teacher-monitor-screen { padding: 40px; align-items: center; justify-content: flex-start; }
+    .monitor-container { width: 800px; background: var(--panel); border: 2px solid var(--accent); padding: 30px; box-shadow: 0 0 50px rgba(255,0,60,0.2); }
+    .monitor-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; }
+    .monitor-title { color: var(--accent); font-family: 'JetBrains Mono'; font-size: 1.5rem; text-shadow: 0 0 10px var(--accent); }
+    .monitor-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; }
+    .monitor-row { display: flex; justify-content: space-between; padding: 15px; background: #000; border: 1px solid var(--border); font-family: 'JetBrains Mono'; font-size: 1.2rem; }
+    .monitor-row:nth-child(1) { border-color: var(--yellow); color: var(--yellow); box-shadow: 0 0 10px rgba(255, 204, 0, 0.2); }
+    .monitor-row:nth-child(2) { border-color: #ccc; color: #ccc; }
+    .monitor-row:nth-child(3) { border-color: #cd7f32; color: #cd7f32; }
+
+    /* FINAL PODIUM SCREEN */
+    #teacher-podium-screen { justify-content: center; align-items: center; background: #000; }
+    .podium-container { text-align: center; width: 100%; max-width: 1000px; }
+    .podium-title { font-size: 4rem; font-family: 'JetBrains Mono'; color: var(--yellow); text-shadow: 0 0 30px var(--yellow); margin-bottom: 50px; animation: blink 2s infinite; }
+    .podium-steps { display: flex; justify-content: center; align-items: flex-end; gap: 20px; height: 400px; }
+    .podium-step { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; width: 250px; background: var(--panel); border: 2px solid #333; border-bottom: none; padding: 20px; font-family: 'JetBrains Mono'; position: relative; }
+    .podium-step h3 { font-size: 1.5rem; margin-bottom: 10px; text-align: center; word-wrap: break-word; }
+    .podium-step p { font-size: 2rem; font-weight: bold; }
+    
+    .step-1 { height: 350px; border-color: var(--yellow); background: linear-gradient(to top, rgba(255, 204, 0, 0.1), var(--panel)); box-shadow: 0 -10px 30px rgba(255, 204, 0, 0.2); }
+    .step-2 { height: 250px; border-color: #ccc; background: linear-gradient(to top, rgba(204, 204, 204, 0.1), var(--panel)); }
+    .step-3 { height: 180px; border-color: #cd7f32; background: linear-gradient(to top, rgba(205, 127, 50, 0.1), var(--panel)); }
+
+    .podium-1st { color: var(--yellow); }
+    .podium-2nd { color: #ccc; }
+    .podium-3rd { color: #cd7f32; }
+
+    /* STUDENT GAME OVER SCREEN */
+    #student-gameover-screen { justify-content: center; align-items: center; background: rgba(0,0,0,0.9); }
+    .gameover-box { text-align: center; border: 2px solid var(--accent); padding: 60px; background: var(--panel); box-shadow: 0 0 50px rgba(255,0,60,0.2); border-radius: 10px; }
+</style>
+</head>
+<body>
+
+<!-- BOOT SCREEN -->
+<div id="boot-screen" class="screen active">
+    <div class="boot-text" id="boot-text">> INITIALIZING CIPHER RUNTIME...</div>
+</div>
+
+<!-- JOIN SCREEN -->
+<div id="join-screen" class="screen">
+    <div class="join-box">
+        <h1>CIPHER</h1>
+        <p>Student Access</p>
+        <div class="input-group">
+            <label>Game PIN</label>
+            <input type="text" id="pin-input" placeholder="e.g. 123456" maxlength="6">
+        </div>
+        <div class="input-group">
+            <label>Full Name (Letters Only)</label>
+            <input type="text" id="name-input" placeholder="Ali Hassan" oninput="this.value = this.value.replace(/[^a-zA-Z\s]/g, '')">
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <div class="input-group" style="flex:1;">
+                <label>Class</label>
+                <select id="class-input">
+                    <option value="" disabled selected>Select</option>
+                    <option value="A-1">A-1</option><option value="A-2">A-2</option><option value="A-3">A-3</option>
+                    <option value="A-4">A-4</option><option value="A-5">A-5</option><option value="A-6">A-6</option>
+                    <option value="A-7">A-7</option><option value="A-8">A-8</option><option value="A-9">A-9</option>
+                    <option value="A-10">A-10</option><option value="A-11">A-11</option><option value="A-12">A-12</option>
+                    <option value="A-13">A-13</option><option value="A-14">A-14</option><option value="A-15">A-15</option>
+                    <option value="A-16">A-16</option><option value="A-17">A-17</option><option value="A-18">A-18</option>
+                    <option value="A-19">A-19</option><option value="A-20">A-20</option>
+                </select>
+            </div>
+            <div class="input-group" style="flex:1;">
+                <label>Academic ID</label>
+                <input type="text" id="id-input" placeholder="20415" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+            </div>
+        </div>
+        <button class="btn" style="width:100%; margin-top: 20px;" onclick="joinSession()">Access Terminal</button>
+        <p id="join-error" style="color:var(--accent); margin-top:10px; font-family:'JetBrains Mono';"></p>
+    </div>
+
+    <div class="join-box" style="width: 300px; border-color: var(--accent);">
+        <h2 style="color:var(--accent); font-family:'JetBrains Mono';">TEACHER</h2>
+        <p>Host a game</p>
+        <button class="btn btn-red" style="width:100%;" onclick="createGame()">Host Game</button>
+    </div>
+</div>
+
+<!-- TEACHER LOBBY SCREEN -->
+<div id="teacher-screen" class="screen">
+    <div class="teacher-box">
+        <h1 style="color:var(--green); font-family:'JetBrains Mono';">SESSION CREATED</h1>
+        <p style="color:#aaa;">Students enter this PIN:</p>
+        <div class="pin-display" id="teacher-pin">------</div>
+        
+        <div style="text-align: left; margin-bottom: 10px; color:var(--yellow); font-family:'JetBrains Mono';">PLAYERS JOINED: <span id="player-count">0</span></div>
+        <div class="teacher-roster" id="teacher-roster">
+            Waiting for students...
+        </div>
+
+        <button class="btn" style="width:100%; margin-top: 20px; font-size: 1.2rem;" onclick="startGameTeacher()">Start Game</button>
+        <button class="btn btn-red" style="width:100%; margin-top: 10px;" onclick="location.reload()">Cancel</button>
+    </div>
+</div>
+
+<!-- TEACHER MONITOR DASHBOARD -->
+<div id="teacher-monitor-screen" class="screen">
+    <div class="monitor-container">
+        <div class="monitor-header">
+            <div class="monitor-title">LIVE JUDGE OVERWATCH</div>
+            <div style="color:var(--green); font-family:'JetBrains Mono'; font-size: 1.2rem;">PIN: <span id="monitor-pin">------</span></div>
+        </div>
+        <div class="monitor-list" id="monitor-list">
+            <div style="color:#888; font-family:'JetBrains Mono'; text-align:center;">Waiting for scores to update...</div>
+        </div>
+        <button class="btn btn-red" style="width:100%; margin-top: 20px; font-size: 1.2rem;" onclick="endGameTeacher()">End Game & Show Podium</button>
+    </div>
+</div>
+
+<!-- TEACHER FINAL PODIUM -->
+<div id="teacher-podium-screen" class="screen">
+    <div class="podium-container">
+        <h1 class="podium-title">FINAL RANKINGS</h1>
+        <div class="podium-steps" id="podium-steps">
+            <!-- Injected via JS -->
+        </div>
+        <button class="btn" style="margin-top: 50px;" onclick="location.reload()">Return to Home</button>
+    </div>
+</div>
+
+<!-- STUDENT WAITING SCREEN -->
+<div id="waiting-screen" class="screen" style="justify-content:center; align-items:center;">
+    <div style="text-align:center;">
+        <h1 style="color:var(--green); font-family:'JetBrains Mono'; font-size:3rem;">WAITING FOR TEACHER</h1>
+        <p style="color:#aaa; font-family:'JetBrains Mono'; font-size:1.2rem; margin-top:10px;">You are in the lobby. The game will begin shortly.</p>
+    </div>
+</div>
+
+<!-- STUDENT HUB SCREEN -->
+<div id="hub-screen" class="screen">
+    <header>
+        <div class="user-info">
+            <h2 id="hub-name">OPERATIVE: ---</h2>
+            <p style="font-size:0.8rem; color:#888;" id="hub-meta">CLASS: --- | ID: ---</p>
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+            <span style="color:var(--green); font-family:'JetBrains Mono'; font-size:0.8rem;">MULTIPLAYER</span>
+            <button class="btn btn-red" onclick="location.reload()">Disconnect</button>
+        </div>
+    </header>
+    <h2 style="color:white; margin-bottom: 20px; font-family:'JetBrains Mono';">SELECT PROTOCOL</h2>
+    <div class="grid">
+        <div class="card" onclick="startPasswordHeist()">
+            <h3>Password Heist</h3>
+            <p>Hack into rival terminals. Choose a secret password, then use real Python loops to brute-force the A.I.'s password before they hack you.</p>
+        </div>
+        <div class="card" onclick="startFarmTycoon()">
+            <h3>Farm Tycoon</h3>
+            <p>Program a drone to till the soil, plant seeds, and harvest crops. Compete against 15 other players to get the highest yield!</p>
+        </div>
+    </div>
+</div>
+
+<!-- STUDENT GAME OVER SCREEN -->
+<div id="student-gameover-screen" class="screen">
+    <div class="gameover-box">
+        <h1 style="color: var(--accent); font-family: 'JetBrains Mono'; font-size: 4rem; text-shadow: 0 0 20px var(--accent); margin-bottom: 20px;">MATCH OVER</h1>
+        <p style="color: white; font-family: 'JetBrains Mono'; font-size: 1.5rem; margin-bottom: 30px;">The teacher has ended the session.</p>
+        <div style="font-size: 2rem; font-family: 'JetBrains Mono'; color: var(--yellow); font-weight: bold; margin-bottom: 30px;">
+            Your Final Rank: <span id="final-rank-display">#1</span>
+        </div>
+        <button class="btn" onclick="location.reload()">Return to Login</button>
+    </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="game-screen" class="screen">
+    <div id="death-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(20, 0, 0, 0.85); z-index: 50; display: none; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(5px);">
+        <h1 style="color: var(--accent); font-family: 'JetBrains Mono'; font-size: 4rem; text-shadow: 0 0 20px var(--accent); margin-bottom: 20px;">SYSTEM BREACHED</h1>
+        <p style="color: #fff; font-family: 'JetBrains Mono'; font-size: 1.5rem;">You have been eliminated. Waiting for next round...</p>
+    </div>
+
+    <div class="sidebar" id="game-sidebar"></div>
+
+    <div class="main-area">
+        <div id="farm-display" class="farm-layout" style="display:none;">
+            <div class="grid-wrapper">
+                <div class="compass-container" style="display:flex; align-items:center; gap:15px;">
+                    <div style="color:var(--blue); font-family:'JetBrains Mono'; font-weight:bold;">◀ WEST</div>
+                    <div style="display:flex; flex-direction:column; align-items:center;">
+                        <div style="color:var(--blue); font-family:'JetBrains Mono'; font-weight:bold; margin-bottom:5px;">▲ NORTH</div>
+                        <div id="farm-grid" class="grid-container"></div>
+                        <div style="color:var(--blue); font-family:'JetBrains Mono'; font-weight:bold; margin-top:5px;">▼ SOUTH</div>
+                    </div>
+                    <div style="color:var(--blue); font-family:'JetBrains Mono'; font-weight:bold;">EAST ▶</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="editor-container" style="flex: 1; min-height: 150px;">
+            <div class="line-numbers" id="line-numbers">1</div>
+            <textarea id="code-editor" spellcheck="false" oninput="updateLineNumbers()" onkeydown="handleEditorKeydown(event)" onpaste="return false;" oncontextmenu="return false;" placeholder="# Type your Python code here..."></textarea>
+        </div>
+
+        <div class="terminal-container">
+            <div class="terminal-head">
+                <span>TERMINAL // OUTPUT</span>
+                <span id="terminal-status">Idle</span>
+            </div>
+            <div class="terminal-output" id="terminal-output">Awaiting execution...</div>
+        </div>
+        
+        <button class="btn" style="padding: 15px; font-size: 1.2rem;" onclick="runPython()" id="run-btn">▶ EXECUTE CODE</button>
+    </div>
+</div>
+
+<!-- PASSWORD SELECTION MODAL -->
+<div id="password-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 100; display: none; justify-content: center; align-items: center;">
+    <div style="background: var(--panel); border: 2px solid var(--green); padding: 40px; text-align: center; box-shadow: 0 0 50px rgba(0,255,65,0.2); max-width: 600px; width: 100%;">
+        <h2 style="color: var(--green); font-family: 'JetBrains Mono', monospace; margin-bottom: 20px;">SECURE YOUR TERMINAL</h2>
+        <p style="color:#aaa; margin-bottom: 20px;">Choose a password to lock in. If a rival hacks it, you lose.</p>
+        <div class="password-options" id="password-options" style="display: flex; gap: 20px; justify-content: center;"></div>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let pyodide = null;
+    let studentData = {};
+    let currentGameMode = ''; 
+    let heistState = {};
+    let farmState = {};
+    let isTeacher = false; 
+    let currentPin = "";
+    let latestPlayers = []; // Store latest scores
+
+    async function boot() {
+        const bootText = document.getElementById('boot-text');
+        const phrases = ["> INITIALIZING CIPHER RUNTIME...", "> LOADING PYTHON 3.11 WASM...", "> CONNECTING TO SERVER...", "> SYSTEM READY."];
+        for(let i = 0; i < phrases.length; i++) {
+            bootText.innerText = phrases[i];
+            await new Promise(r => setTimeout(r, 600));
+        }
+        try {
+            pyodide = await loadPyodide();
+            document.getElementById('boot-screen').classList.remove('active');
+            document.getElementById('join-screen').classList.add('active');
+        } catch (e) {
+            bootText.innerText = "> CRITICAL ERROR: FAILED TO LOAD PYTHON ENGINE.";
+        }
+    }
+    boot();
+
+    // --- TEACHER LOGIC ---
+    function createGame() { isTeacher = true; socket.emit('create-game'); }
+
+    socket.on('game-created', (pin) => {
+        currentPin = pin;
+        document.getElementById('join-screen').classList.remove('active');
+        document.getElementById('teacher-screen').classList.add('active');
+        document.getElementById('teacher-pin').innerText = pin;
+    });
+
+    socket.on('player-joined', (players) => {
+        latestPlayers = players;
+        document.getElementById('player-count').innerText = players.length;
+        document.getElementById('teacher-roster').innerHTML = players.map(p => `<div>${p.name} (${p.class}) - ID: ${p.id}</div>`).join('');
+    });
+
+    function startGameTeacher() {
+        if(document.getElementById('player-count').innerText === '0') { alert("Wait for students to join!"); return; }
+        socket.emit('start-game');
+    }
+
+    function endGameTeacher() {
+        socket.emit('end-game');
+    }
+
+    // --- STUDENT LOGIC ---
+    function joinSession() {
+        const pin = document.getElementById('pin-input').value;
+        const name = document.getElementById('name-input').value;
+        const cls = document.getElementById('class-input').value;
+        const id = document.getElementById('id-input').value;
+        
+        if(!pin || !name || !cls || !id) { document.getElementById('join-error').innerText = "ALL FIELDS REQUIRED."; return; }
+
+        currentPin = pin;
+        studentData = { pin, name, class: cls, id, xp: 0 };
+        socket.emit('join-game', studentData);
+    }
+
+    socket.on('join-error', (msg) => { document.getElementById('join-error').innerText = msg; });
+
+    socket.on('join-success', (isStarted) => {
+        document.getElementById('join-screen').classList.remove('active');
+        document.getElementById('hub-name').innerText = `OPERATIVE: ${studentData.name}`;
+        document.getElementById('hub-meta').innerText = `CLASS: ${studentData.class} | ID: ${studentData.id}`;
+        
+        if (isStarted) document.getElementById('hub-screen').classList.add('active');
+        else document.getElementById('waiting-screen').classList.add('active');
+    });
+
+    socket.on('game-started', () => {
+        document.getElementById('waiting-screen').classList.remove('active');
+        document.getElementById('teacher-screen').classList.remove('active');
+        document.getElementById('student-gameover-screen').classList.remove('active');
+        
+        if (isTeacher) {
+            document.getElementById('monitor-pin').innerText = currentPin;
+            document.getElementById('teacher-monitor-screen').classList.add('active');
+        } else {
+            document.getElementById('hub-screen').classList.add('active');
+        }
+    });
+
+    // HANDLE GAME OVER
+    socket.on('game-ended', (players) => {
+        if (isTeacher) {
+            // TEACHER SHOWS PODIUM
+            document.getElementById('teacher-monitor-screen').classList.remove('active');
+            document.getElementById('teacher-podium-screen').classList.add('active');
+            
+            players.sort((a, b) => b.xp - a.xp);
+            const podium = document.getElementById('podium-steps');
+            podium.innerHTML = '';
+
+            // 2nd Place
+            if (players[1]) {
+                podium.innerHTML += `<div class="podium-step step-2"><h3 class="podium-2nd">🥈 ${players[1].name}</h3><p>${players[1].xp} XP</p></div>`;
+            }
+            // 1st Place
+            if (players[0]) {
+                podium.innerHTML += `<div class="podium-step step-1"><h3 class="podium-1st">🥇 ${players[0].name}</h3><p>${players[0].xp} XP</p></div>`;
+            }
+            // 3rd Place
+            if (players[2]) {
+                podium.innerHTML += `<div class="podium-step step-3"><h3 class="podium-3rd">🥉 ${players[2].name}</h3><p>${players[2].xp} XP</p></div>`;
+            }
+        } else {
+            // STUDENT SHOWS GAME OVER
+            document.getElementById('game-screen').classList.remove('active');
+            document.getElementById('hub-screen').classList.remove('active');
+            document.getElementById('student-gameover-screen').classList.add('active');
+            
+            players.sort((a, b) => b.xp - a.xp);
+            const myRank = players.findIndex(p => p.id === studentData.id) + 1;
+            document.getElementById('final-rank-display').innerText = `#${myRank}`;
+        }
+    });
+
+    // TEACHER LIVE LEADERBOARD UPDATE
+    socket.on('leaderboard-update', (players) => {
+        latestPlayers = players;
+        if (!isTeacher) return; 
+        const list = document.getElementById('monitor-list');
+        if(!list) return;
+
+        players.sort((a, b) => b.xp - a.xp);
+        
+        list.innerHTML = players.map((p, index) => {
+            let rank = `#${index + 1}`;
+            if (index === 0) rank = '🥇 #1';
+            if (index === 1) rank = '🥈 #2';
+            if (index === 2) rank = '🥉 #3';
+
+            return `
+                <div class="monitor-row">
+                    <span>${rank} - ${p.name} <span style="color:#888; font-size:0.9rem;">(${p.class})</span></span>
+                    <span>${p.xp} PTS</span>
+                </div>
+            `;
+        }).join('');
+    });
+
+    // --- AUTO INDENT ---
+    function handleEditorKeydown(e) {
+        const editor = document.getElementById('code-editor');
+        if(editor.disabled) return;
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = editor.selectionStart;
+            editor.value = editor.value.substring(0, start) + "    " + editor.value.substring(editor.selectionEnd);
+            editor.selectionStart = editor.selectionEnd = start + 4;
+            updateLineNumbers();
+        } 
+        else if (e.key === 'Enter') {
+            e.preventDefault();
+            const start = editor.selectionStart;
+            const val = editor.value;
+            const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+            let currentLine = val.substring(lineStart, start);
+            let indent = 0;
+            while (indent < currentLine.length && currentLine[indent] === ' ') { indent++; }
+            let extra = 0;
+            let trimmed = currentLine.trim();
+            let addColon = false;
+            if ((trimmed.startsWith('for ') || trimmed.startsWith('if ') || trimmed.startsWith('while ')) && !trimmed.endsWith(':')) { addColon = true; }
+            if (trimmed.endsWith(':') || addColon) { extra = 4; }
+            const spaces = " ".repeat(indent + extra);
+            let textToInsert = addColon ? ":\n" + spaces : "\n" + spaces;
+            editor.value = val.substring(0, start) + textToInsert + val.substring(editor.selectionEnd);
+            editor.selectionStart = editor.selectionEnd = start + textToInsert.length;
+            updateLineNumbers();
+        }
+    }
+
+    // --- STUDENT GAME LOGIC (Heist & Farm) ---
+    const heistBotNames = ["Neo_99", "AcidBurn", "CerealKiller", "Phantom", "ZeroCool", "Trinity", "Morpheus", "CipherX", "Ghost", "Raven", "Viper", "Blade", "Shadow", "Hex"];
+    const bigWordlist = ["admin!", "P@ssw0rd", "H4ck3d", "letmein1", "1337c0d3", "B00m!", "S3cr3t!", "qwerty", "xX_cyb3r", "pass123", "root", "toor", "password", "123456", "12345678", "abc123", "monkey", "dragon", "master", "shadow", "superman", "michael", "football", "iloveyou", "charlie", "aa123456", "donald", "qwerty123", "zaq12wsx"];
+
+    function startPasswordHeist() {
+        currentGameMode = 'heist';
+        document.getElementById('game-screen').classList.add('active');
+        document.getElementById('hub-screen').classList.remove('active');
+        document.getElementById('death-overlay').classList.remove('active');
+        document.getElementById('farm-display').style.display = 'none';
+        document.getElementById('code-editor').disabled = false;
+        document.getElementById('run-btn').disabled = false;
+
+        document.getElementById('game-sidebar').innerHTML = `
+            <h2 style="color: var(--green); font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; border-bottom: 1px solid var(--border); padding-bottom: 10px;">PASSWORD HEIST</h2>
+            <div id="heist-leaderboard" style="background: #000; border: 1px solid var(--border); padding: 10px; border-radius: 4px; flex: 1; overflow-y: auto; margin-bottom: 15px;">
+                <h4 style="color: var(--accent); margin-bottom: 10px; font-family:'JetBrains Mono'; border-bottom: 1px solid #333; padding-bottom: 5px;">LIVE MATCH</h4>
+                <div id="heist-players" class="heist-leaderboard-container"></div>
+            </div>
+            <div class="instruction" style="font-size:0.85rem; margin-bottom: 15px;"><p>Hack into rival terminals. Choose a secret password, then use Python to brute-force the A.I.'s password before they hack you.</p></div>
+            <div class="cheat-sheet" style="margin-bottom: 15px;">
+                <h4>Python Script</h4>
+                <div style="margin-top: 10px; line-height: 1.8;"><code>for pwd in wordlist:</code><br><code style="margin-left:15px;">hack(pwd)</code><br></div>
+                <p style="margin-top:10px; font-size:0.75rem; color:var(--accent);">* Press ENTER after typing. It will auto-add the colon and spaces.</p>
+            </div>
+            <div style="margin-top: auto;"><button class="btn btn-red" style="width:100%;" onclick="exitGame()">Abort Mission</button></div>
+        `;
+
+        heistState = { myPassword: "", rivalInterval: null, matchInterval: null, hasShield: false, isGameOver: false, wordlist: bigWordlist, bots: {}, aliveBots: [...heistBotNames], isPlayerDead: false };
+        heistState.aliveBots.forEach(bot => { heistState.bots[bot] = { password: bigWordlist[Math.floor(Math.random() * bigWordlist.length)], alive: true }; });
+        
+        document.getElementById('code-editor').value = "";
+        updateLineNumbers();
+        document.getElementById('terminal-output').innerHTML = "Select a password to begin the hack.";
+        renderHeistLeaderboard();
+
+        const optionsDiv = document.getElementById('password-options');
+        optionsDiv.innerHTML = '';
+        let options = [bigWordlist[0], bigWordlist[1], bigWordlist[2]];
+        options.forEach(pwd => {
+            const btn = document.createElement('button'); btn.className = 'btn'; btn.style.fontSize = "1.5rem"; btn.style.padding = "20px"; btn.innerText = pwd;
+            btn.onclick = () => {
+                document.getElementById('password-modal').style.display = 'none';
+                heistState.myPassword = pwd;
+                document.getElementById('terminal-output').innerHTML += `\nPassword locked. Hacking initiated...\n`;
+                startHeistTimers();
+            };
+            optionsDiv.appendChild(btn);
+        });
+        document.getElementById('password-modal').style.display = 'flex';
+    }
+
+    function renderHeistLeaderboard() {
+        const list = document.getElementById('heist-players');
+        if(!list) return;
+        list.innerHTML = `<div class="heist-player you" id="heist-player-YOU"><span>${studentData.name}</span><span id="you-status" class="heist-status status-active">ACTIVE</span></div>`;
+        heistBotNames.forEach(name => {
+            list.innerHTML += `<div class="heist-player" id="heist-player-${name}"><span>${name}</span><span class="heist-status status-active">ACTIVE</span></div>`;
+        });
+    }
+
+    function startHeistTimers() {
+        heistState.rivalInterval = setInterval(() => {
+            if(heistState.isPlayerDead || heistState.isGameOver) return;
+            if (Math.random() < 0.15) {
+                if (heistState.hasShield) {
+                    heistState.hasShield = false;
+                    document.getElementById('terminal-output').innerHTML += `<span style="color:var(--yellow)">[!] Rival hacked you! Shield absorbed the hit.</span>\n`;
+                } else { playerGotHacked(); }
+            }
+        }, 12000);
+
+        heistState.matchInterval = setInterval(() => {
+            if(heistState.isGameOver || heistState.aliveBots.length === 0) return;
+            const deadIndex = Math.floor(Math.random() * heistState.aliveBots.length);
+            const deadBot = heistState.aliveBots[deadIndex];
+            heistState.aliveBots.splice(deadIndex, 1);
+            heistState.bots[deadBot].alive = false;
+
+            const row = document.getElementById(`heist-player-${deadBot}`);
+            if(row) { row.classList.add('dead'); row.querySelector('.heist-status').className = 'heist-status status-hacked'; row.querySelector('.heist-status').innerText = 'HACKED'; }
+
+            if(heistState.aliveBots.length === 0 && !heistState.isGameOver && !heistState.isPlayerDead) {
+                heistState.isGameOver = true;
+                clearInterval(heistState.rivalInterval); clearInterval(heistState.matchInterval);
+                document.getElementById('terminal-output').innerHTML += `\n<span class="success">[SYSTEM] VICTORY ROYALE! All rivals eliminated. +500 XP.</span>\n`;
+                studentData.xp += 500;
+                socket.emit('update-score', { id: studentData.id, xp: studentData.xp });
+            }
+        }, 5000);
+    }
+
+    function playerGotHacked() {
+        heistState.isPlayerDead = true;
+        clearInterval(heistState.rivalInterval);
+        document.getElementById('terminal-output').innerHTML += `<span style="color:var(--accent)">[!] Rival hacked your password (${heistState.myPassword}). System breached.</span>\n`;
+        document.getElementById('heist-player-YOU').classList.add('dead');
+        document.getElementById('you-status').className = 'heist-status status-hacked'; document.getElementById('you-status').innerText = 'HACKED';
+        document.getElementById('code-editor').disabled = true; document.getElementById('run-btn').disabled = true;
+        document.getElementById('death-overlay').classList.add('active');
+    }
+
+    window.attemptHack = function(guess) {
+        if (currentGameMode !== 'heist' || heistState.isGameOver || heistState.isPlayerDead || heistState.aliveBots.length === 0) return;
+        const targetBot = heistState.aliveBots[Math.floor(Math.random() * heistState.aliveBots.length)];
+        
+        if (guess === heistState.bots[targetBot].password) {
+            const idx = heistState.aliveBots.indexOf(targetBot);
+            heistState.aliveBots.splice(idx, 1);
+            heistState.bots[targetBot].alive = false;
+
+            document.getElementById('terminal-output').innerHTML += `<span class="success">[+] HACKED: ${targetBot} eliminated!</span>\n`;
+            const row = document.getElementById(`heist-player-${targetBot}`);
+            if(row) { row.classList.add('dead'); row.querySelector('.heist-status').className = 'heist-status status-hacked'; row.querySelector('.heist-status').innerText = 'HACKED'; }
+
+            heistState.hasShield = true;
+            document.getElementById('terminal-output').innerHTML += `<span class="success">[SYSTEM] SHIELD ACQUIRED! You survived the counter-hack.</span>\n`;
+            studentData.xp += 100; socket.emit('update-score', { id: studentData.id, xp: studentData.xp });
+
+            if(heistState.aliveBots.length === 0) {
+                heistState.isGameOver = true;
+                clearInterval(heistState.rivalInterval); clearInterval(heistState.matchInterval);
+                document.getElementById('terminal-output').innerHTML += `\n<span class="success">[SYSTEM] VICTORY ROYALE! All rivals eliminated. +500 XP.</span>\n`;
+                studentData.xp += 500; socket.emit('update-score', { id: studentData.id, xp: studentData.xp });
+            }
+        } else {
+            document.getElementById('terminal-output').innerHTML += `<span class="error">[-] Denied: '${guess}' does not match target.</span>\n`;
+        }
+    };
+
+    const farmBotNames = ["Neo_99", "AcidBurn", "CerealKiller", "Phantom", "ZeroCool", "Trinity", "Morpheus", "CipherX", "Ghost", "Raven", "Viper", "Blade", "Shadow", "Hex", "Data_Rat"];
+
+    function startFarmTycoon() {
+        currentGameMode = 'farm';
+        document.getElementById('game-screen').classList.add('active');
+        document.getElementById('hub-screen').classList.remove('active');
+        document.getElementById('death-overlay').classList.remove('active');
+        document.getElementById('farm-display').style.display = 'flex';
+        document.getElementById('code-editor').disabled = false;
+        document.getElementById('run-btn').disabled = false;
+        
+        document.getElementById('game-sidebar').innerHTML = `
+            <h2 style="color: var(--green); font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; border-bottom: 1px solid var(--border); padding-bottom: 10px;">FARM CHAMPIONSHIP</h2>
+            <div id="farm-legend" style="background: #000; border: 1px solid var(--border); padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                <div style="display:flex; gap:10px; color:#ccc;"><span style="color:var(--magenta); font-weight:bold;">[BOT]</span> X: <span id="drone-x">0</span>, Y: <span id="drone-y">0</span></div>
+                <div style="display:flex; gap:10px; color:#ccc;"><span style="color:#00ff00; font-weight:bold;">[G]</span> Grass</div>
+                <div style="display:flex; gap:10px; color:#ccc;"><span style="color:#ff8800; font-weight:bold;">[C]</span> Carrot</div>
+                <div style="display:flex; gap:10px; color:#ccc;"><span style="color:var(--brown); font-weight:bold;">[T]</span> Tilled Dirt</div>
+            </div>
+            <div class="instruction" style="font-size:0.85rem; margin-bottom: 15px;">
+                <p><strong>OBJECTIVE:</strong> Get the highest yield!</p>
+                <p><strong>Grass</strong> grows in 100ms. Plant and harvest for points.</p>
+                <p><strong>Carrots</strong> take 1 second to grow. Use <code>sleep(1)</code>.</p>
+            </div>
+            <div class="cheat-sheet" style="margin-bottom: 15px;">
+                <h4>Python API</h4>
+                <div style="margin-top: 10px; line-height: 1.8;">
+                    <code>move("north")</code><br><code>move("south")</code><br><code>move("east")</code><br><code>move("west")</code><br><code>till()</code><br><code>plant("grass")</code><br><code>plant("carrot")</code><br><code>harvest()</code><br><code style="color:var(--accent); margin-top:10px;">sleep(1)</code>
+                </div>
+                <p style="margin-top:10px; font-size:0.75rem; color:var(--accent);">* Press ENTER after typing loops. It will auto-add colon and spaces.</p>
+            </div>
+            <div style="margin-top: auto;"><button class="btn btn-red" style="width:100%;" onclick="exitGame()">Abort Mission</button></div>
+        `;
+
+        farmState = { gridSize: 16, droneX: 0, droneY: 0, yield: 0, grid: [], timeLeft: 300, timerInterval: null, botInterval: null, commandQueue: [], isProcessingQueue: false };
+        const gridContainer = document.getElementById('farm-grid');
+        gridContainer.style.gridTemplateColumns = `repeat(16, 28px)`;
+        gridContainer.innerHTML = '';
+        for (let y = 0; y < 16; y++) {
+            let row = [];
+            for (let x = 0; x < 16; x++) {
+                row.push({ state: null, type: null, plantedAt: 0 }); 
+                gridContainer.innerHTML += `<div class="tile" id="tile-${x}-${y}"></div>`;
+            }
+            farmState.grid.push(row);
+        }
+
+        document.getElementById('code-editor').value = "";
+        updateLineNumbers();
+        document.getElementById('terminal-output').innerHTML = "Drone ready. Click Execute to run code.";
+        updateFarmVisuals();
+        
+        document.getElementById('farm-timer').innerText = "05:00";
+        document.getElementById('run-btn').disabled = false;
+
+        farmState.timerInterval = setInterval(() => {
+            farmState.timeLeft--;
+            const m = Math.floor(farmState.timeLeft / 60).toString().padStart(2, '0');
+            const s = (farmState.timeLeft % 60).toString().padStart(2, '0');
+            document.getElementById('farm-timer').innerText = `${m}:${s}`;
+            if(farmState.timeLeft <= 0) {
+                clearInterval(farmState.timerInterval); clearInterval(farmState.botInterval);
+                document.getElementById('run-btn').disabled = true;
+                logTerminal(`<span class="error">[!] TIME IS UP!</span>`);
+            }
+        }, 1000);
+    }
+
+    function updateFarmVisuals() {
+        const xEl = document.getElementById('drone-x'); const yEl = document.getElementById('drone-y');
+        if (xEl) xEl.innerText = farmState.droneX;
+        if (yEl) yEl.innerText = farmState.droneY;
+        for (let y = 0; y < farmState.gridSize; y++) {
+            for (let x = 0; x < farmState.gridSize; x++) {
+                const tileEl = document.getElementById(`tile-${x}-${y}`);
+                if (!tileEl) continue;
+                const data = farmState.grid[y][x];
+                tileEl.className = 'tile'; tileEl.innerText = '';
+                if (data.state === 'tilled') { tileEl.classList.add('tilled'); tileEl.innerText = 'T'; }
+                else if (data.state === 'planted') { tileEl.classList.add('planted'); tileEl.innerText = '🌱'; }
+                else if (data.state === 'grown') { tileEl.classList.add(data.type === 'carrot' ? 'grown-carrot' : 'grown-grass'); tileEl.innerText = data.type === 'carrot' ? 'C' : 'G'; }
+                if (x === farmState.droneX && y === farmState.droneY) { tileEl.classList.add('drone'); tileEl.innerText = 'BOT'; }
+            }
+        }
+    }
+
+    function logTerminal(msg) { const out = document.getElementById('terminal-output'); out.innerHTML += msg + "\n"; out.scrollTop = out.scrollHeight; }
+    function queueCommand(action, args) { farmState.commandQueue.push({ action, args }); if (!farmState.isProcessingQueue) processQueue(); }
+    
+    async function processQueue() {
+        farmState.isProcessingQueue = true;
+        while (farmState.commandQueue.length > 0) {
+            if (farmState.timeLeft <= 0) break;
+            const cmd = farmState.commandQueue.shift();
+            if (cmd.action === 'wait') { await new Promise(r => setTimeout(r, cmd.args)); } 
+            else { executeCommand(cmd.action, cmd.args); await new Promise(r => setTimeout(r, 150)); }
+        }
+        farmState.isProcessingQueue = false;
+    }
+
+    function executeCommand(action, args) {
+        if (action === 'move') {
+            let d = args; let moved = false;
+            if(d === 'north' && farmState.droneY > 0) { farmState.droneY--; moved = true; }
+            else if(d === 'south' && farmState.droneY < 15) { farmState.droneY++; moved = true; }
+            else if(d === 'east' && farmState.droneX < 15) { farmState.droneX++; moved = true; }
+            else if(d === 'west' && farmState.droneX > 0) { farmState.droneX--; moved = true; }
+            if(moved) logTerminal(`Drone moved to X: ${farmState.droneX}, Y: ${farmState.droneY}.`);
+            else logTerminal(`<span class="error">[-] Cannot move ${d}.</span>`);
+        } 
+        else if (action === 'till') { farmState.grid[farmState.droneY][farmState.droneX].state = 'tilled'; logTerminal(`Soil tilled.`); } 
+        else if (action === 'plant') {
+            const cell = farmState.grid[farmState.droneY][farmState.droneX];
+            if (cell.state === 'tilled' || cell.state === null) { cell.state = 'planted'; cell.type = args; cell.plantedAt = Date.now(); logTerminal(`Planted ${args}.`); } 
+            else logTerminal(`<span class="error">[-] Cannot plant. Occupied.</span>`);
+        } 
+        else if (action === 'harvest') {
+            const cell = farmState.grid[farmState.droneY][farmState.droneX];
+            if (cell.state === 'grown') {
+                farmState.yield++; cell.state = null; cell.type = null; logTerminal(`<span class="success">[+] Harvested +1!</span>`);
+                socket.emit('update-score', { id: studentData.id, xp: farmState.yield * 10 });
+            } 
+            else if (cell.state === 'planted') logTerminal(`<span class="info">[-] Not grown yet!</span>`);
+            else logTerminal(`<span class="error">[-] Nothing planted.</span>`);
+        }
+        updateFarmVisuals();
+    }
+
+    setInterval(() => {
+        if (currentGameMode !== 'farm' || farmState.timeLeft <= 0) return;
+        let changed = false;
+        for (let y = 0; y < 16; y++) {
+            for (let x = 0; x < 16; x++) {
+                const cell = farmState.grid[y][x];
+                if (cell.state === 'planted') {
+                    const growTime = cell.type === 'carrot' ? 1000 : 100;
+                    if (Date.now() - cell.plantedAt >= growTime) { cell.state = 'grown'; changed = true; }
+                }
+            }
+        }
+        if (changed) updateFarmVisuals();
+    }, 50);
+
+    function setupFarmPythonAPI() {
+        pyodide.globals.set("js_move", (dir) => queueCommand('move', dir.toString().toLowerCase()));
+        pyodide.globals.set("js_till", () => queueCommand('till'));
+        pyodide.globals.set("js_plant", (t) => queueCommand('plant', t.toString().toLowerCase()));
+        pyodide.globals.set("js_harvest", () => queueCommand('harvest'));
+        pyodide.globals.set("js_sleep", (seconds) => queueCommand('wait', parseFloat(seconds) * 1000));
+        pyodide.runPython(`def move(direction):\n    js_move(direction)\ndef till():\n    js_till()\ndef plant(crop):\n    js_plant(crop)\ndef harvest():\n    js_harvest()\ndef sleep(seconds):\n    js_sleep(seconds)`);
+    }
+
+    function updateLineNumbers() {
+        const lines = document.getElementById('code-editor').value.split('\n').length;
+        let numbers = '';
+        for(let i = 1; i <= Math.max(lines, 1); i++) { numbers += i + '<br>'; }
+        document.getElementById('line-numbers').innerHTML = numbers;
+    }
+
+    async function runPython() {
+        const code = document.getElementById('code-editor').value;
+        const outputEl = document.getElementById('terminal-output');
+        const statusEl = document.getElementById('terminal-status');
+        
+        if(!code.trim()) { outputEl.innerHTML += '\n<span class="error">Error: No code.</span>'; return; }
+        if(farmState.timeLeft <= 0 && currentGameMode === 'farm') { outputEl.innerHTML += '\n<span class="error">Error: Match over.</span>'; return; }
+        if(currentGameMode === 'heist' && heistState.isPlayerDead) { outputEl.innerHTML += '\n<span class="error">Error: Eliminated.</span>'; return; }
+
+        statusEl.innerText = "Running..."; statusEl.style.color = "var(--accent)"; outputEl.innerHTML += "\n> Executing...\n";
+        document.getElementById('code-editor').value = ""; updateLineNumbers();
+
+        try { pyodide.runPython(`for name in list(globals().keys()):\n    if not name.startswith('_') and name not in ['js', 'move', 'till', 'plant', 'harvest', 'sleep', 'hack', 'wordlist', 'worldlist', 'js_move', 'js_till', 'js_plant', 'js_harvest', 'js_sleep']:\n        del globals()[name]`); } catch(e) { }
+        pyodide.setStdout({ batched: (msg) => { outputEl.innerHTML += msg + "\n"; outputEl.scrollTop = outputEl.scrollHeight; } });
+
+        try {
+            if (currentGameMode === 'heist') {
+                pyodide.globals.set("wordlist", heistState.wordlist);
+                pyodide.globals.set("worldlist", heistState.wordlist); 
+                pyodide.runPython(`def hack(guess):\n    import js\n    js.attemptHack(guess)`);
+            } 
+            else if (currentGameMode === 'farm') setupFarmPythonAPI();
+
+            await pyodide.runPythonAsync(code);
+            while(farmState.isProcessingQueue) { await new Promise(r => setTimeout(r, 50)); }
+            statusEl.innerText = "Success"; statusEl.style.color = "var(--green)";
+        } catch (err) {
+            statusEl.innerText = "Error"; statusEl.style.color = "var(--accent)";
+            outputEl.innerHTML += `\n<span class="error">${err.message}</span>`;
+        }
+    }
+
+    function exitGame() {
+        if(currentGameMode === 'heist' && heistState.rivalInterval) clearInterval(heistState.rivalInterval);
+        if(currentGameMode === 'heist' && heistState.matchInterval) clearInterval(heistState.matchInterval);
+        if(currentGameMode === 'farm') { clearInterval(farmState.timerInterval); clearInterval(farmState.botInterval); }
+        document.getElementById('game-screen').classList.remove('active');
+        document.getElementById('hub-screen').classList.add('active');
+    }
+</script>
+</body>
+</html>
